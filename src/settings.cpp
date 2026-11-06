@@ -50,6 +50,33 @@ namespace {
             Text(Tr(L"Settings", L"Настройки"), { Pad, y, 300, 40 }, Font(28, DWRITE_FONT_WEIGHT_SEMI_BOLD, true), T.text);
             y += 44;
 
+            // ---------------------------------------------------------------- accounts
+            y += Section(y, Tr(L"Accounts", L"Аккаунты"));
+            {
+                bool sw = Core::Mode() == Core::OpenMode::Switch;
+                float segW = 2 * 132 + 8;
+                float h = Card(y, Tr(L"Picking an account", L"Выбор аккаунта"),
+                               sw ? Tr(L"Switches the main Claude: it closes and reopens signed in as that account. One Claude window; anything Claude Code is doing stops",
+                                       L"Переключает основной Claude: он закроется и откроется под этим аккаунтом. Одно окно Claude; всё, что делает Claude Code, остановится")
+                                  : Tr(L"Opens the account in a Claude window of its own, next to the others. Every account stays signed in and open at once",
+                                       L"Открывает аккаунт в отдельном окне Claude, рядом с остальными. Все аккаунты остаются открытыми одновременно"), segW, 84);
+                RectF seg{ w - Pad - 16 - segW, y + h / 2 - 17, segW, 34 };
+                Fill(seg, T.control, 6); Stroke(seg, T.controlStroke, 6);
+                const wchar_t* labels[] = { Tr(L"Own windows", L"Свои окна"), Tr(L"Switch Claude", L"Переключать") };
+                for (int i = 0; i < 2; i++) {
+                    RectF b{ seg.x + 4 + i * 132.f, seg.y + 4, 132, 26 };
+                    UINT id = Id("mode", i);
+                    bool on = (i == 1) == sw;
+                    float t = A(id ^ 0x5E, on ? 1.f : 0.f, 140), hh = HotT(id);
+                    Fill(b, Mix(Mix(D2D1::ColorF(0, 0, 0, 0), T.layerHover, hh), T.accent, t), 4);
+                    Text(labels[i], b, Font(13), Mix(T.text, T.onAccent, t), Align::Center);
+                    auto mode = i == 1 ? Core::OpenMode::Switch : Core::OpenMode::Windows;
+                    Hit(id, b, [this, mode] { Core::SetMode(mode); Picker::Invalidate(); Invalidate(); });
+                    FocusRing(id, b, 4);
+                }
+                y += h + 4;
+            }
+
             // ---------------------------------------------------------------- startup
             y += Section(y, Tr(L"Startup", L"Запуск"));
             y += ToggleRow(y, Tr(L"Start with Windows", L"Запускать вместе с Windows"), Tr(L"The switcher starts when you sign in and waits in the tray", L"Переключатель стартует при входе в систему и ждёт в трее"),

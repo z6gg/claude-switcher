@@ -7,7 +7,8 @@ Each version's section becomes the description of its GitHub release.
 
 ### Added
 
-- **A new account names itself.** Once you sign in, its card takes the name the account goes by in Claude instead of staying "Account 2". It happens once; renaming it yourself (F2) always wins. Only the display name is read, from Claude's local cache in that profile.
+- **Switch the main Claude instead of opening another window.** Settings → Accounts → Picking an account → Switch Claude. Picking an account then closes Claude and reopens it signed in as that account, so there is one Claude window, as with an account switcher. It works by swapping the two accounts' data folders while Claude is closed: renames on the same drive, nothing copied or deleted, and switching back puts everything where it was. A journal makes sure a switch cut short by a crash is finished or undone at the next start. If Claude Code is working in Claude, the switch asks first. Adding an account in this mode signs in right in the main Claude.
+- **A new account names itself.** Once you sign in, its card takes the account's name in Claude (its full name, not the nickname Claude calls you by) instead of staying "Account 2". It happens once; renaming it yourself (F2) always wins. Only the display name is read, from Claude's local cache in that profile.
 
 ### Fixed
 

@@ -25,6 +25,7 @@
 
 Claude Desktop holds one sign-in at a time, so switching to your work account means signing out of your personal one. Claude Profile Switcher gives every account its own window with its own sign-in, chats and settings, and lets you have all of them open at once.
 
+- **Side by side or one at a time.** Every account in its own window, all signed in at once, or one Claude window that switches between accounts: your choice in Settings.
 - **One shortcut.** <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd> opens the picker from any app, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> opens an account directly.
 - **Always at hand.** It waits in the tray, starts with Windows and can open your usual accounts on its own.
 - **Usage at a glance.** Each card shows how much of the 5-hour and 7-day limits that account has used.

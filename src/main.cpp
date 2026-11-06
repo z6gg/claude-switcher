@@ -72,7 +72,7 @@ static int Run() {
         if (!EnsureClaude(true)) return 1;
         Profile p;
         if (!Core::Resolve(launch, p)) throw Util::Format(Tr(L"There is no account called %s", L"Аккаунта %s нет"), Util::Q(launch).c_str());
-        Core::Start(p.id);
+        Core::Open(p.id);   // switches the main Claude to it, or opens its own window, by the setting
         return 0;
     }
 

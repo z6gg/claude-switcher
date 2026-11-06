@@ -265,12 +265,22 @@ namespace App {
         std::vector<std::wstring> ids;
         for (auto& id : all) { auto it = Find(id); if (!it || !it->deleting) ids.push_back(id); }
         if (ids.empty()) return;
-        for (auto& id : ids) if (auto it = Find(id)) if (!it->running()) { it->launching = true; it->launchAt = GetTickCount64(); }
+        // Switching the main Claude is for one account; picking several opens them side by side.
+        bool switching = ids.size() == 1 && _wcsicmp(ids[0].c_str(), Core::DefaultId) != 0 && Core::Mode() == Core::OpenMode::Switch;
+        if (switching) {
+            if (Core::MainBusy() && !Dialogs::Ask(Owner(nullptr), Tr(L"Claude Code is working in Claude", L"В Claude работает Claude Code"),
+                    Tr(L"Switching closes Claude and reopens it as the other account, which stops anything Claude Code is doing now",
+                       L"Переключение закроет Claude и откроет его под другим аккаунтом, а всё, что сейчас делает Claude Code, остановится"),
+                    Tr(L"Switch", L"Переключить"), true)) return;
+            // The account opens in the main Claude, so that is the card that shows it starting.
+            if (auto main = Find(Core::DefaultId)) { main->launching = true; main->launchAt = GetTickCount64(); main->endingPid = main->p.pid; }
+        } else
+            for (auto& id : ids) if (auto it = Find(id)) if (!it->running()) { it->launching = true; it->launchAt = GetTickCount64(); }
         RedrawAll();
-        std::thread([ids] {
+        std::thread([ids, switching] {
             auto r = new LaunchResult();
             for (auto& id : ids) {
-                try { Core::Start(id); }
+                try { if (switching) Core::SwitchMain(id); else Core::Start(id); }
                 catch (const std::wstring& e) { r->errors.push_back(e); Core::Log(e); }
                 catch (...) { r->errors.push_back(Util::Format(Tr(L"Couldn't open %s", L"Не удалось открыть %s"), Util::Q(id).c_str())); }
             }
@@ -313,8 +323,14 @@ namespace App {
     void AddAccount() {
         // The new account's sign-in may finish in the browser, and that only comes back to it
         // once the switcher handles claude:// links. Without that the sign-in is lost, so this
-        // asks every time an account is added until it is set up.
-        if (!Paths::Demo && !Core::LinksRouted()) {
+        // asks every time an account is added until it is set up. Switching the main Claude
+        // needs none of it: the sign-in happens in the main Claude, where links go anyway.
+        bool switching = Core::Mode() == Core::OpenMode::Switch;
+        if (switching && Core::MainBusy() && !Dialogs::Ask(Owner(nullptr), Tr(L"Claude Code is working in Claude", L"В Claude работает Claude Code"),
+                Tr(L"Adding an account closes Claude and reopens it at the sign-in screen, which stops anything Claude Code is doing now",
+                   L"Добавление аккаунта закроет Claude и откроет его на экране входа, а всё, что сейчас делает Claude Code, остановится"),
+                Tr(L"Continue", L"Продолжить"), true)) return;
+        if (!Paths::Demo && !switching && !Core::LinksRouted()) {
             if (Dialogs::Ask(Owner(nullptr), Tr(L"Let sign-in come back to this account", L"Чтобы вход вернулся в этот аккаунт"),
                              Tr(L"Signing in with Google or single sign-on finishes in the browser, and Windows sends the way back to the main account. "
                                 L"In the Settings page that opens, choose Claude Profile Switcher for CLAUDE: then it comes back to the account you started it in. This is needed once.",
@@ -495,9 +511,13 @@ namespace App {
             auto p = (Profile*)l;
             if (!p) { Dialogs::Info(Owner(nullptr), Tr(L"Couldn't add an account", L"Не удалось добавить аккаунт"), Tr(L"Details were written to ", L"Подробности записаны в ") + Paths::Log); return 0; }
             auto id = p->id;
-            std::vector<Profile> list; for (auto& i : items) list.push_back(i.p);
-            list.push_back(*p); delete p;
-            Merge(list, false);
+            // Switching the main Claude, the new account is in the main card, already listed.
+            if (!p->isDefault) {
+                std::vector<Profile> list; for (auto& i : items) list.push_back(i.p);
+                list.push_back(*p);
+                Merge(list, false);
+            }
+            delete p;
             if (auto it = Find(id)) { it->launching = true; it->launchAt = GetTickCount64(); }
             ShowPicker();
             Picker::NewAccountHint(id);
@@ -571,6 +591,9 @@ namespace App {
         // Keeps the claude:// handler pointing at this exe, and takes over one left by the
         // PowerShell version; a few registry writes.
         Core::RegisterLinks();
+        // A switch of the main Claude cut short (a crash, a power cut) is finished or undone
+        // before anything reads the folders.
+        try { Core::FinishSwitch(); } catch (const std::wstring& e) { Core::Log(L"Switch: " + e); }
         // Finishes any delete a locked file held up last time; off the UI thread.
         std::thread([] { Core::SweepDeleted(); }).detach();
         WinShell::DarkMenus(Gfx::T.dark);

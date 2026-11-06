@@ -601,7 +601,10 @@ namespace Core {
         Profile p;
         if (!Resolve(name, p)) throw Util::Format(Tr(L"The new account %s didn't appear", L"Новый аккаунт %s не появился"), Util::Q(name).c_str());
         // Straight to the sign-in screen: there is nothing else to do with an empty profile.
-        Start(p.id);
+        // Switching the main Claude, that is the main Claude itself, which the new account
+        // then lives in; the account that was there takes the new card.
+        if (Mode() == OpenMode::Switch && !Paths::Demo) { SwitchMain(p.id); Resolve(DefaultId, p); }
+        else Start(p.id);
         return p;
     }
 
@@ -919,6 +922,30 @@ namespace Core {
         Settings::Save(all);
     }
 
+    // Renames a folder in one step, which fails while any file inside is open. Antivirus and
+    // the search indexer let go within moments, so a busy folder is tried for a few seconds.
+    static bool MoveDir(const std::wstring& from, const std::wstring& to, DWORD& err) {
+        for (int i = 0; i < 25; i++) {
+            if (MoveFileExW(Long(from).c_str(), Long(to).c_str(), 0)) return true;
+            err = GetLastError();
+            if (err != ERROR_SHARING_VIOLATION && err != ERROR_ACCESS_DENIED && err != ERROR_LOCK_VIOLATION) return false;
+            Sleep(200);
+        }
+        return false;
+    }
+
+    // Why a folder couldn't be moved, naming the program in the way when Windows knows it.
+    static std::wstring InUse(const std::wstring& dir, const std::wstring& name, DWORD err) {
+        auto who = WhoUses(dir);
+        if (!who.empty()) return Util::Format(Tr(L"%s is still using files of %s. Close it and try again",
+                                                 L"Файлы %s ещё использует %s. Закройте его и повторите"),
+                                              L10n::ru ? Util::Q(name).c_str() : who.c_str(), L10n::ru ? who.c_str() : Util::Q(name).c_str());
+        if (err == ERROR_NOT_SAME_DEVICE)
+            return Util::Format(Tr(L"%s is on another drive than the profiles folder", L"%s находится на другом диске, чем папка профилей"), Util::Q(dir).c_str());
+        return Util::Format(Tr(L"Windows wouldn't let go of the %s folder (code %lu). Close anything that may be using it and try again",
+                               L"Windows не отпускает папку %s (код %lu). Закройте всё, что может её использовать, и повторите"), Util::Q(name).c_str(), err);
+    }
+
     void Delete(const Profile& p) {
         if (p.isDefault) throw std::wstring(Tr(L"The main account can't be deleted", L"Основной аккаунт удалить нельзя"));
         auto path = Paths::Root + L"\\" + p.id;
@@ -933,18 +960,9 @@ namespace Core {
             // Moved aside in one step, which fails while any file inside is open, so either
             // the account is gone at once or nothing at all has been touched.
             auto aside = Paths::Root + L"\\" + DeletedPrefix + p.id + Util::Format(L"-%llu", GetTickCount64());
-            bool moved = false; DWORD err = 0;
-            for (int i = 0; i < 25 && !moved; i++) {
-                moved = MoveFileExW(Long(path).c_str(), Long(aside).c_str(), 0) != 0;
-                if (!moved) { err = GetLastError(); Sleep(200); }   // antivirus and the search indexer let go quickly
-            }
-            if (!moved) {
-                auto who = WhoUses(path);
-                auto msg = who.empty()
-                    ? Util::Format(Tr(L"Windows wouldn't let go of the %s folder (code %lu). Close anything that may be using it and try again",
-                                      L"Windows не отпускает папку %s (код %lu). Закройте всё, что может её использовать, и повторите"), Util::Q(p.id).c_str(), err)
-                    : Util::Format(Tr(L"%s is still using files of this account. Close it and try again",
-                                      L"Файлы этого аккаунта ещё использует %s. Закройте его и повторите"), who.c_str());
+            DWORD err = 0;
+            if (!MoveDir(path, aside, err)) {
+                auto msg = InUse(path, p.name, err);
                 Log(L"Delete " + p.id + L": " + msg);
                 throw msg;
             }
@@ -953,6 +971,139 @@ namespace Core {
         RemoveShortcuts(p.name);
         RemoveProfileIcons(p.id);
         Forget(p.id);
+    }
+
+    // ------------------------------------------------------------ switching the main Claude
+
+    /*
+        In "switch" mode there is one Claude window, the main one, and picking an account
+        signs it in as that account. Claude keeps a sign-in in its data folder, so the main
+        folder and the account's folder change places while Claude is closed:
+
+            main  -> .switching          the account that was in Claude, set aside
+            slot  -> main                the picked account moves into Claude's own folder
+            .switching -> slot           the one that was in Claude takes the picked one's place
+
+        All three are renames on the same drive, so nothing is copied and nothing is lost: a
+        switch back puts every folder where it was. A journal written before the first rename
+        lets the next start finish or undo a switch that was cut short.
+    */
+    OpenMode Mode() { return Settings::Str(L"OpenMode") == L"switch" ? OpenMode::Switch : OpenMode::Windows; }
+    void SetMode(OpenMode m) { Settings::Set(L"OpenMode", m == OpenMode::Switch ? L"switch" : L"windows"); }
+
+    static std::wstring JournalFile() { return Paths::Root + L"\\.switch-journal.json"; }
+    static std::wstring Aside() { return Paths::Root + L"\\.switching"; }
+
+    bool MainBusy() { return !Paths::Demo && !ProcessesInside(App.defaultData).empty(); }
+
+    // Labels after a switch: each account keeps a name it was given; one still called by its
+    // folder ("Account 2") or "Main" takes its Claude name instead. Written to the journal
+    // first, so applying them twice after a crash gives the same result.
+    static void ApplyNames(const json::Value& j) {
+        auto id = j.Str(L"id");
+        auto oldMain = j.Str(L"oldMainName"), oldSlot = j.Str(L"oldSlotName");
+        auto all = Settings::Load();
+        auto& labels = all[L"Labels"];
+        if (labels.type != json::Value::Object) labels = json::Value::MakeObject();
+        labels.Remove(DefaultId); labels.Remove(id);
+        for (size_t i = 0; i < labels.obj.size();)
+            if (!_wcsicmp(labels.obj[i].first.c_str(), id.c_str()) || !_wcsicmp(labels.obj[i].first.c_str(), DefaultId)) labels.obj.erase(labels.obj.begin() + i); else i++;
+        auto mainLabel = j.Str(L"mainLabel"), slotLabel = j.Str(L"slotLabel");
+        if (!mainLabel.empty()) labels[DefaultId] = mainLabel;
+        if (!slotLabel.empty() && slotLabel != id) labels[id] = slotLabel;
+        all[L"MainWantsName"] = j.Flag(L"mainWantsName", false);
+        Settings::Save(all);
+        // Shortcuts carry the names: the old ones go, and come back under the new names.
+        auto removedMain = RemoveShortcuts(oldMain), removedSlot = RemoveShortcuts(oldSlot);
+        Profile pm, ps;
+        if (Resolve(DefaultId, pm)) for (auto& l : removedMain) CreateProfileShortcut(pm, Util::Parent(l));
+        if (Resolve(id, ps)) for (auto& l : removedSlot) CreateProfileShortcut(ps, Util::Parent(l));
+    }
+
+    void FinishSwitch() {
+        auto text = Util::ReadText(JournalFile());
+        if (text.empty()) return;
+        json::Value j;
+        if (!json::Parser::Parse(text, j) || j.type != json::Value::Object) { DeleteFileW(JournalFile().c_str()); return; }
+        auto main = j.Str(L"main"), slot = j.Str(L"slot"), aside = Aside();
+        DWORD err = 0;
+        if (Util::IsDir(aside)) {
+            if (Util::IsDir(main) && !Util::IsDir(slot)) {
+                // Cut short after the picked account moved in: finish it.
+                if (!MoveDir(aside, slot, err)) { Log(L"Switch: couldn't finish, " + InUse(aside, slot, err)); return; }
+            } else if (!Util::IsDir(main)) {
+                // Cut short before: put Claude's own folder back.
+                if (MoveDir(aside, main, err)) { Log(L"Switch: undone after an interruption"); DeleteFileW(JournalFile().c_str()); }
+                else Log(L"Switch: couldn't undo, " + InUse(aside, main, err));
+                return;
+            } else { Log(L"Switch: " + aside + L" and both folders exist; left for you to look at"); return; }
+        } else if (!j.Flag(L"moved", false) && Util::IsDir(main) && Util::IsDir(slot)) {
+            // Nothing had been moved yet.
+            DeleteFileW(JournalFile().c_str());
+            return;
+        }
+        ApplyNames(j);
+        DeleteFileW(JournalFile().c_str());
+        Log(L"Switch: finished after an interruption");
+    }
+
+    void SwitchMain(const std::wstring& id) {
+        if (_wcsicmp(id.c_str(), DefaultId) == 0) { Start(DefaultId); return; }
+        FinishSwitch();
+        Profile pm, ps;
+        if (!Resolve(DefaultId, pm) || !Resolve(id, ps)) throw Util::Format(Tr(L"There is no account called %s", L"Аккаунта %s нет"), Util::Q(id).c_str());
+        auto main = App.defaultData, slot = ps.path, aside = Aside();
+        if (Util::Exists(JournalFile()) || Util::Exists(aside))
+            throw std::wstring(Tr(L"An earlier switch didn't finish; see the error log", L"Предыдущее переключение не завершилось, подробности в журнале ошибок"));
+        CreateDirectoryW(main.c_str(), nullptr);   // Claude never run yet: an empty folder to swap
+        CreateDirectoryW(slot.c_str(), nullptr);
+
+        // Names, worked out while each account is still where it was.
+        auto labelOf = [](const Profile& p) { return p.name == p.id ? std::wstring() : p.name; };
+        auto incoming = AccountName(slot), outgoing = AccountName(main);
+        auto mainLabel = labelOf(ps); if (mainLabel.empty()) mainLabel = incoming;
+        auto slotLabel = labelOf(pm); if (slotLabel.empty()) slotLabel = outgoing.empty() ? std::wstring(Tr(L"Previous main", L"Прежний основной")) : outgoing;
+        if (!mainLabel.empty() && _wcsicmp(mainLabel.c_str(), slotLabel.c_str()) == 0) slotLabel += L" 2";
+        auto j = json::Value::MakeObject();
+        j[L"id"] = ps.id; j[L"main"] = main; j[L"slot"] = slot;
+        j[L"oldMainName"] = pm.name; j[L"oldSlotName"] = ps.name;
+        j[L"mainLabel"] = mainLabel; j[L"slotLabel"] = slotLabel;
+        j[L"mainWantsName"] = mainLabel.empty();   // a new account: named once it has signed in
+        Trace(L"switch to " + ps.id + L": main '" + mainLabel + L"', slot '" + slotLabel + L"'");
+
+        // Both Claudes closed, and anything still running from either folder.
+        if (!Paths::Demo) {
+            Close(DefaultId); Close(ps.id);
+            EndProcesses(ProcessesInside(main)); EndProcesses(ProcessesInside(slot));
+        }
+        std::wstring out; json::Write(out, j);
+        if (!Util::WriteText(JournalFile(), out, false)) throw std::wstring(Tr(L"Couldn't write to the profiles folder", L"Не удалось записать в папку профилей"));
+        DWORD err = 0;
+        if (!MoveDir(main, aside, err)) {
+            DeleteFileW(JournalFile().c_str());
+            throw InUse(main, Tr(L"Claude's own data", L"данные самого Claude"), err);
+        }
+        if (!MoveDir(slot, main, err)) {
+            DWORD back = 0;
+            auto msg = InUse(slot, ps.name, err);
+            if (MoveDir(aside, main, back)) DeleteFileW(JournalFile().c_str());
+            else Log(L"Switch: couldn't put Claude's folder back, " + InUse(aside, main, back));
+            throw msg;
+        }
+        if (!MoveDir(aside, slot, err)) {
+            Log(L"Switch: " + InUse(aside, slot, err) + L"; finishing at the next start");
+        } else {
+            j[L"moved"] = true;
+            out.clear(); json::Write(out, j); Util::WriteText(JournalFile(), out, false);
+            ApplyNames(j);
+            DeleteFileW(JournalFile().c_str());
+        }
+        if (!Paths::Demo) Start(DefaultId);
+    }
+
+    void Open(const std::wstring& id) {
+        if (Mode() == OpenMode::Switch && _wcsicmp(id.c_str(), DefaultId) != 0) SwitchMain(id);
+        else Start(id);
     }
 
     // ============================================================ colours
@@ -1266,16 +1417,20 @@ namespace Core {
     }
 
     static std::wstring NameIn(const std::string& b, const std::string& uuid) {
-        const std::string anchor = std::string("\"\x04uuid\"\x24", 7) + uuid;
+        // "uuid" as a 4-character string, then the value: a 36-character ('$') string.
+        static const char key[] = { '"', 4, 'u', 'u', 'i', 'd', '"', 36 };
+        const std::string anchor = std::string(key, sizeof key) + uuid;
         for (size_t at = b.find(anchor); at != std::string::npos; at = b.find(anchor, at + 1)) {
             // The object's own fields follow within a few hundred bytes, before the next uuid.
             size_t end = std::min(b.size(), at + anchor.size() + 1024);
             size_t next = b.find("\"\x04uuid\"", at + anchor.size());
             if (next != std::string::npos) end = std::min(end, next);
-            for (const char* key : { "\"\x0c" "display_name", "\"\x09" "full_name" }) {
-                auto k = b.find(key, at + anchor.size());
+            // full_name is the account's name as Claude shows it; display_name is only what
+            // Claude calls you in chat (often a nickname or a single letter), so it comes second.
+            for (const char* field : { "\"\x09" "full_name", "\"\x0c" "display_name" }) {
+                auto k = b.find(field, at + anchor.size());
                 if (k == std::string::npos || k >= end) continue;
-                auto name = V8String(b, k + strlen(key));
+                auto name = V8String(b, k + strlen(field));
                 if (name.find_first_not_of(L' ') != std::wstring::npos) return name;
             }
         }
@@ -1359,16 +1514,21 @@ namespace Core {
 
     // Accounts still called "Account N" by the switcher, never named by hand nor named before.
     static bool WantsName(const Profile& p, const std::set<std::wstring>& done) {
-        if (p.isDefault || p.name != p.id || done.count(Util::Lower(p.id))) return false;
+        // The main slot only right after a new account was switched into it.
+        if (p.isDefault) return p.name == p.id && Settings::Flag(L"MainWantsName", false);
+        if (p.name != p.id || done.count(Util::Lower(p.id))) return false;
         if (p.id.rfind(L"Account ", 0) != 0 || p.id.size() == 8) return false;
         return p.id.find_first_not_of(L"0123456789", 8) == std::wstring::npos;
     }
 
     bool NameFromAccount(const Profile& p) {
         if (p.accountName.empty()) return false;
-        auto done = Settings::List(L"AutoNamed");
-        done.push_back(p.id);
-        Settings::SetList(L"AutoNamed", done);   // once only, even if the name doesn't fit
+        if (p.isDefault) Settings::Set(L"MainWantsName", false);
+        else {
+            auto done = Settings::List(L"AutoNamed");
+            done.push_back(p.id);
+            Settings::SetList(L"AutoNamed", done);   // once only, even if the name doesn't fit
+        }
         auto label = LabelFrom(p.accountName, p.id);
         if (label.empty()) return false;
         Rename(p, label);

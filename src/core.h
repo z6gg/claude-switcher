@@ -125,6 +125,15 @@ namespace Core {
     std::wstring AccountName(const std::wstring& profileDir);   // the name the account goes by in Claude, or L""
     bool NameFromAccount(const Profile& p);        // renames a new account after p.accountName, once
     void Delete(const Profile& p);                 // closes its Claude first; throws std::wstring when it can't
+
+    // How an account opens: in a Claude window of its own, or by switching the main Claude to it.
+    enum class OpenMode { Windows, Switch };
+    OpenMode Mode();
+    void SetMode(OpenMode m);
+    void Open(const std::wstring& id);             // by the mode; throws std::wstring
+    void SwitchMain(const std::wstring& id);       // closes Claude, swaps the sign-ins, reopens it
+    void FinishSwitch();                           // completes or undoes a switch cut short
+    bool MainBusy();                               // Claude Code is running in the main Claude
     void SweepDeleted();                           // finishes deletions a locked file held up
 
     COLORREF ProfileColor(const std::wstring& id);

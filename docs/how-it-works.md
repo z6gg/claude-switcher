@@ -35,6 +35,15 @@ flowchart LR
 4. **Watches what is open.** A process snapshot plus each process's command line maps running Claude windows to profiles, on a background thread.
 5. **Fits into Windows.** Shortcuts get per-account icons drawn with Direct2D, the taskbar gets a jump list, start with Windows is one `Run` value, and the optional per-account taskbar buttons set each window's `AppUserModelID`.
 
+## Switching the main Claude
+
+With **Settings → Accounts → Picking an account → Switch Claude**, there is only the main Claude window. Picking an account closes it, swaps the main data folder with that account's folder, and starts it again, now signed in as the other account. The account that was in Claude takes the picked account's card.
+
+- The swap is three renames on the same drive (main → aside, account → main, aside → account), so nothing is copied, nothing is deleted, and switching back restores every folder.
+- A small journal in `%LOCALAPPDATA%\ClaudeProfiles` is written before the first rename. If the switch is cut short, the next start finishes it or undoes it.
+- Closing Claude stops anything Claude Code is doing in it, so the switch asks first when Claude Code is running.
+- Claude Code chats started without a folder keep their workspace inside the data folder, by its full path; they show up while their account is the one in Claude.
+
 ## What each account has to itself, and what is shared
 
 **Separate per account:** sign-in, chats, window settings, cache, the Code chat list.

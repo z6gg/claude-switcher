@@ -99,7 +99,8 @@ namespace {
                 Animate();
             } else {
                 auto it = App::Find(newAccount);
-                title = Tr(L"Sign in in the new Claude window", L"Войдите в аккаунт в новом окне Claude");
+                title = it && it->p.isDefault ? Tr(L"Sign in in Claude", L"Войдите в аккаунт в Claude")
+                                              : Tr(L"Sign in in the new Claude window", L"Войдите в аккаунт в новом окне Claude");
                 text = it && !it->p.wantsName && it->name != it->p.id
                     ? Util::Format(Tr(L"Signed in. It's called %s now; press F2 to rename it", L"Вход выполнен. Теперь он называется %s, F2 переименует"), Util::Q(it->name).c_str())
                     : Tr(L"Once you're signed in, the card takes your Claude name. Press F2 to choose your own", L"Когда вы войдёте, карточка получит ваше имя в Claude. Нажмите F2, чтобы задать своё");
@@ -247,7 +248,9 @@ namespace {
                 Text(Tr(L"Clear", L"Сбросить"), clear, Font(14), T.text2, Align::Center);
                 Hit(Id("clear"), clear, [this] { ClearSelection(); });
             } else {
-                auto hint = Tr(L"Press a number to open, Ctrl+click to pick several", L"Цифра открывает аккаунт, Ctrl+клик выбирает несколько");
+                auto hint = Core::Mode() == Core::OpenMode::Switch
+                    ? Tr(L"Pick an account to switch Claude to it", L"Выберите аккаунт, чтобы переключить на него Claude")
+                    : Tr(L"Press a number to open, Ctrl+click to pick several", L"Цифра открывает аккаунт, Ctrl+клик выбирает несколько");
                 Text(hint, { W - Pad - 300, y, 300, 32 }, Font(12), T.text3, Align::Right);
             }
             contentHeight = y + 32 + 22;
