@@ -9,12 +9,11 @@ namespace {
     // Cards grow a limits section only when some account has current figures to show.
     float TileH() { for (auto& i : App::items) if (i.p.usage.known) return 204; return 152; }
 
-    enum class Banner { None, Countdown, NewAccount };
+    enum class Banner { None, Countdown };
 
     struct PickerWin : Surface {
         Banner banner = Banner::None;
         LARGE_INTEGER countdownEnd{}; double countdownTotal = 0;
-        std::wstring newAccount;
         RectF bannerButton;
         std::wstring renaming;     // id whose name is being edited in place
 
@@ -80,39 +79,25 @@ namespace {
 
         // ------------------------------------------------------------ drawing
 
+        // The countdown before the accounts ticked to open at sign-in.
         void BannerUi(float y) {
             RectF r{ Pad, y, W - 2 * Pad, 64 };
             Fill(r, T.accentTint, 6);
-            const wchar_t* glyph = CountingDown() ? Glyphs::Timer : Glyphs::Contact;
-            Glyph(glyph, { r.x + 12, r.y + 12, 24, 24 }, 16, T.accentText);
-            std::wstring title, text, button;
-            if (CountingDown()) {
-                double left = SecondsLeft();
-                if (left <= 0) { FinishCountdown(); return; }
-                std::vector<std::wstring> names; for (auto i : Checked()) names.push_back(i->name);
-                title = L10n::ru ? Util::Format(L"Через %d с %s %s", (int)std::ceil(left), names.size() == 1 ? L"откроется" : L"откроются", Util::Names(names).c_str())
-                                 : Util::Format(L"Opening %s in %d s", Util::Names(names).c_str(), (int)std::ceil(left));
-                text = Tr(L"Press any key to choose yourself", L"Нажмите любую клавишу, чтобы выбрать самостоятельно");
-                button = Tr(L"Open now", L"Открыть сейчас");
-                float w = (float)(r.w * left / countdownTotal);
-                Fill({ r.x, r.B() - 3, w, 3 }, T.accent, 1.5f);
-                Animate();
-            } else {
-                auto it = App::Find(newAccount);
-                title = it && it->p.isDefault ? Tr(L"Sign in in Claude", L"Войдите в аккаунт в Claude")
-                                              : Tr(L"Sign in in the new Claude window", L"Войдите в аккаунт в новом окне Claude");
-                text = it && !it->p.wantsName && it->name != it->p.id
-                    ? Util::Format(Tr(L"Signed in. It's called %s now; press F2 to rename it", L"Вход выполнен. Теперь он называется %s, F2 переименует"), Util::Q(it->name).c_str())
-                    : Tr(L"Once you're signed in, the card takes your Claude name. Press F2 to choose your own", L"Когда вы войдёте, карточка получит ваше имя в Claude. Нажмите F2, чтобы задать своё");
-                button = Tr(L"Done", L"Готово");
-            }
+            Glyph(Glyphs::Timer, { r.x + 12, r.y + 12, 24, 24 }, 16, T.accentText);
+            double left = SecondsLeft();
+            if (left <= 0) { FinishCountdown(); return; }
+            std::vector<std::wstring> names; for (auto i : Checked()) names.push_back(i->name);
+            auto title = L10n::ru ? Util::Format(L"Через %d с %s %s", (int)std::ceil(left), names.size() == 1 ? L"откроется" : L"откроются", Util::Names(names).c_str())
+                                  : Util::Format(L"Opening %s in %d s", Util::Names(names).c_str(), (int)std::ceil(left));
+            std::wstring text = Tr(L"Press any key to choose yourself", L"Нажмите любую клавишу, чтобы выбрать самостоятельно");
+            std::wstring button = Tr(L"Open now", L"Открыть сейчас");
+            Fill({ r.x, r.B() - 3, (float)(r.w * left / countdownTotal), 3 }, T.accent, 1.5f);
+            Animate();
             float bw = Measure(button, Font(14)).width + 26;
             bannerButton = { r.R() - bw - 12, r.y + 16, bw, 32 };
             Text(title, { r.x + 44, r.y + 12, r.w - 44 - bw - 24, 20 }, Font(14, DWRITE_FONT_WEIGHT_SEMI_BOLD), T.text);
             Text(text, { r.x + 44, r.y + 33, r.w - 44 - bw - 24, 18 }, Font(12), T.text2);
-            Button(Id("banner"), bannerButton, button, false, [this] {
-                if (CountingDown()) FinishCountdown(); else { banner = Banner::None; Invalidate(); }
-            });
+            Button(Id("banner"), bannerButton, button, false, [this] { FinishCountdown(); });
         }
 
         void UsageRow(float x, float y, float w, const wchar_t* label, double pct, bool stale) {
@@ -331,7 +316,6 @@ namespace Picker {
     void Close() { if (win) { win->CancelCountdown(); win->Hide(); } }
     bool Visible() { return win && win->Visible(); }
     bool Active() { return win && GetForegroundWindow() == win->hwnd; }
-    void NewAccountHint(const std::wstring& id) { auto& w = Get(); w.banner = Banner::NewAccount; w.newAccount = id; w.Invalidate(); }
     void Rename(const std::wstring& id) {
         auto& w = Get();
         if (auto it = App::Find(id)) {

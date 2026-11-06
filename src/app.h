@@ -68,7 +68,6 @@ namespace Picker {
     void Close();
     bool Visible();
     bool Active();
-    void NewAccountHint(const std::wstring& id);
     void Rename(const std::wstring& id);
     void Restyle();
     void Invalidate();

@@ -520,7 +520,6 @@ namespace App {
             delete p;
             if (auto it = Find(id)) { it->launching = true; it->launchAt = GetTickCount64(); }
             ShowPicker();
-            Picker::NewAccountHint(id);
             Refresh();
             return 0;
         }

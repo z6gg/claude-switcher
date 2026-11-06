@@ -62,7 +62,7 @@ namespace {
                                        L"Открывает аккаунт в отдельном окне Claude, рядом с остальными. Все аккаунты остаются открытыми одновременно"), segW, 84);
                 RectF seg{ w - Pad - 16 - segW, y + h / 2 - 17, segW, 34 };
                 Fill(seg, T.control, 6); Stroke(seg, T.controlStroke, 6);
-                const wchar_t* labels[] = { Tr(L"Own windows", L"Свои окна"), Tr(L"Switch Claude", L"Переключать") };
+                const wchar_t* labels[] = { Tr(L"Add Instance", L"Новое окно"), Tr(L"Switch Claude", L"Переключать") };
                 for (int i = 0; i < 2; i++) {
                     RectF b{ seg.x + 4 + i * 132.f, seg.y + 4, 132, 26 };
                     UINT id = Id("mode", i);
