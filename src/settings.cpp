@@ -56,8 +56,8 @@ namespace {
                 bool sw = Core::Mode() == Core::OpenMode::Switch;
                 float segW = 2 * 132 + 8;
                 float h = Card(y, Tr(L"Picking an account", L"Выбор аккаунта"),
-                               sw ? Tr(L"Switches the main Claude: it closes and reopens signed in as that account. One Claude window; anything Claude Code is doing stops",
-                                       L"Переключает основной Claude: он закроется и откроется под этим аккаунтом. Одно окно Claude; всё, что делает Claude Code, остановится")
+                               sw ? Tr(L"Switches the account in the main Claude instance. Claude restarts to switch, which stops anything Claude Code is doing",
+                                       L"Переключает аккаунт в основном экземпляре Claude. Для этого Claude перезапускается, и всё, что делает Claude Code, остановится")
                                   : Tr(L"Adds an instance of Claude for the account, running alongside the other(s). Every account stays signed in and open at once",
                                        L"Добавляет ещё один экземпляр Claude для аккаунта, который работает рядом с остальными. Все аккаунты остаются открытыми одновременно"), segW, 84);
                 RectF seg{ w - Pad - 16 - segW, y + h / 2 - 17, segW, 34 };
