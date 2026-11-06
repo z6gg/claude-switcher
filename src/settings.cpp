@@ -58,8 +58,8 @@ namespace {
                 float h = Card(y, Tr(L"Picking an account", L"Выбор аккаунта"),
                                sw ? Tr(L"Switches the main Claude: it closes and reopens signed in as that account. One Claude window; anything Claude Code is doing stops",
                                        L"Переключает основной Claude: он закроется и откроется под этим аккаунтом. Одно окно Claude; всё, что делает Claude Code, остановится")
-                                  : Tr(L"Opens the account in a Claude window of its own, next to the others. Every account stays signed in and open at once",
-                                       L"Открывает аккаунт в отдельном окне Claude, рядом с остальными. Все аккаунты остаются открытыми одновременно"), segW, 84);
+                                  : Tr(L"Adds an instance of Claude for the account, running alongside the other(s). Every account stays signed in and open at once",
+                                       L"Добавляет ещё один экземпляр Claude для аккаунта, который работает рядом с остальными. Все аккаунты остаются открытыми одновременно"), segW, 84);
                 RectF seg{ w - Pad - 16 - segW, y + h / 2 - 17, segW, 34 };
                 Fill(seg, T.control, 6); Stroke(seg, T.controlStroke, 6);
                 const wchar_t* labels[] = { Tr(L"Add Instance", L"Новое окно"), Tr(L"Switch Claude", L"Переключать") };
