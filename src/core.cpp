@@ -994,7 +994,90 @@ namespace Core {
     static std::wstring JournalFile() { return Paths::Root + L"\\.switch-journal.json"; }
     static std::wstring Aside() { return Paths::Root + L"\\.switching"; }
 
-    bool MainBusy() { return !Paths::Demo && !ProcessesInside(App.defaultData).empty(); }
+    /*
+        Is Claude Code in the middle of something in the main Claude? Every open Code chat keeps
+        its own claude.exe running, working or not, and Claude starts spares ahead of time, so a
+        running process says nothing. Each one names its chat (--resume=<id>), and Claude Code
+        writes the chat's transcript to <config>\projects\<project>\<id>.jsonl as it goes: when
+        the last reply there ended its turn, the chat is idle; a pending tool call, an unanswered
+        message or a reply still streaming means it is working.
+    */
+    static std::wstring ChatId(const std::wstring& cmd) {
+        for (auto flag : { L"--resume", L"--session-id" }) {
+            auto i = cmd.find(flag);
+            if (i == std::wstring::npos) continue;
+            i += wcslen(flag);
+            while (i < cmd.size() && (cmd[i] == L'=' || cmd[i] == L' ' || cmd[i] == L'"')) i++;
+            auto id = cmd.substr(i, 36);
+            if (id.size() == 36 && id.find_first_not_of(L"0123456789abcdefABCDEF-") == std::wstring::npos) return id;
+        }
+        return L"";
+    }
+
+    static std::wstring Transcript(const std::wstring& id) {
+        wchar_t custom[MAX_PATH * 2] = {};
+        std::wstring config = GetEnvironmentVariableW(L"CLAUDE_CONFIG_DIR", custom, ARRAYSIZE(custom)) ? custom : Env(L"USERPROFILE") + L"\\.claude";
+        auto projects = config + L"\\projects";
+        WIN32_FIND_DATAW fd; HANDLE h = FindFirstFileW((projects + L"\\*").c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) return L"";
+        std::wstring found;
+        do {
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == L'.') continue;
+            auto f = projects + L"\\" + fd.cFileName + L"\\" + id + L".jsonl";
+            if (Util::Exists(f)) { found = f; break; }
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+        return found;
+    }
+
+    static bool ChatWorking(const std::wstring& id) {
+        auto file = Transcript(id);
+        if (file.empty()) return true;   // can't tell: better to ask than to cut work short
+        HANDLE h = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return true;
+        LARGE_INTEGER size{}; GetFileSizeEx(h, &size);
+        LONGLONG want = std::min<LONGLONG>(size.QuadPart, 1 << 20);   // the end is enough
+        LARGE_INTEGER at; at.QuadPart = size.QuadPart - want;
+        SetFilePointerEx(h, at, nullptr, FILE_BEGIN);
+        std::string tail((size_t)want, '\0'); DWORD got = 0;
+        if (want) ReadFile(h, &tail[0], (DWORD)want, &got, nullptr);
+        CloseHandle(h);
+        tail.resize(got);
+        // Newest line first; the first line of the tail may be cut, and simply won't parse.
+        size_t end = tail.size();
+        while (end > 0) {
+            size_t start = tail.rfind('\n', end - 1);
+            size_t from = start == std::string::npos ? 0 : start + 1;
+            std::string line = tail.substr(from, end - from);
+            end = start == std::string::npos ? 0 : start;
+            if (line.find("\"type\":\"assistant\"") == std::string::npos && line.find("\"type\":\"user\"") == std::string::npos) continue;
+            int n = MultiByteToWideChar(CP_UTF8, 0, line.data(), (int)line.size(), nullptr, 0);
+            std::wstring w(n, L'\0'); if (n) MultiByteToWideChar(CP_UTF8, 0, line.data(), (int)line.size(), &w[0], n);
+            json::Value v;
+            if (!json::Parser::Parse(w, v) || v.type != json::Value::Object) continue;
+            auto type = v.Str(L"type");
+            auto msg = v.Find(L"message");
+            if (type == L"assistant") {
+                auto stop = msg ? msg->Str(L"stop_reason") : L"";
+                return !(stop == L"end_turn" || stop == L"stop_sequence" || stop == L"max_tokens" || stop == L"refusal");
+            }
+            if (type == L"user") {
+                // A turn the person stopped is over; any other message is waiting for a reply.
+                return w.find(L"[Request interrupted by user") == std::wstring::npos;
+            }
+        }
+        return false;   // a chat with nothing in it yet
+    }
+
+    bool MainBusy() {
+        if (Paths::Demo) return false;
+        for (DWORD pid : ProcessesInside(App.defaultData)) {
+            if (_wcsicmp(Util::Leaf(Util::ImageOf(pid)).c_str(), L"claude.exe") != 0) continue;
+            auto id = ChatId(Util::CommandLineOf(pid));
+            if (!id.empty() && ChatWorking(id)) { Trace(L"Claude Code chat " + id + L" is working"); return true; }
+        }
+        return false;
+    }
 
     // Labels after a switch: each account keeps a name it was given; one still called by its
     // folder ("Account 2") or "Main" takes its Claude name instead. Written to the journal
